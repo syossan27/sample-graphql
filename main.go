@@ -18,8 +18,6 @@ type user struct {
 	Name string `db:"name" json:"name"`
 }
 
-var data map[string]user
-
 var userType = graphql.NewObject(
 	graphql.ObjectConfig {
 		Name: "User",
