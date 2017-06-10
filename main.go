@@ -3,46 +3,104 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"bytes"
 
 	"github.com/graphql-go/graphql"
+	"io/ioutil"
 )
 
-func handler(w http.ResponseWriter, r *http.Request) {
-	// Schema
-	fields := graphql.Fields{
-		"hello": &graphql.Field{
-			Type: graphql.String,
-			Resolve: func(p graphql.ResolveParams) (interface{}, error) {
-				return "world", nil
+type user struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+var data map[string]user
+
+var userType = graphql.NewObject(
+	graphql.ObjectConfig {
+		Name: "User",
+		Fields: graphql.Fields {
+			"id": &graphql.Field {
+				Type: graphql.String,
+			},
+			"name": &graphql.Field{
+				Type: graphql.String,
 			},
 		},
+	},
+)
+
+var queryType = graphql.NewObject(
+	graphql.ObjectConfig {
+		Name: "Query",
+		Fields: graphql.Fields {
+			"user": &graphql.Field {
+				Type: userType,
+				Args: graphql.FieldConfigArgument {
+					"id": &graphql.ArgumentConfig {
+						Type: graphql.String,
+					},
+				},
+				Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+					idQuery, isOK := p.Args["id"].(string)
+					if isOK {
+						return data[idQuery], nil
+					}
+					return nil, nil
+				},
+			},
+		},
+	},
+)
+
+var schema, _ = graphql.NewSchema(
+	graphql.SchemaConfig {
+		Query: queryType,
+	},
+)
+
+func executeQuery(query string, schema graphql.Schema) *graphql.Result {
+	result := graphql.Do(graphql.Params {
+		Schema: schema,
+		RequestString: query,
+	})
+
+	if len(result.Errors) > 0 {
+		fmt.Printf("wrong result, unexpected errors: %v", result.Errors)
 	}
 
-	rootQuery := graphql.ObjectConfig{Name: "RootQuery", Fields: fields}
-	schemaConfig := graphql.SchemaConfig{Query: graphql.NewObject(rootQuery)}
-	schema, err := graphql.NewSchema(schemaConfig)
-	if err != nil {
-		log.Fatalf("failed to create new schema, error: %v", err)
-	}
+	return result
+}
 
+func handler(w http.ResponseWriter, r *http.Request) {
 	// Query
 	bufBody := new(bytes.Buffer)
 	bufBody.ReadFrom(r.Body)
 	query := bufBody.String()
 
-	params := graphql.Params{Schema: schema, RequestString: query}
-	d := graphql.Do(params)
-	if len(d.Errors) > 0 {
-		log.Fatalf("failed to execute graphql operation, errors: %v", d.Errors)
-	}
-	rJSON, _ := json.Marshal(d)
-	fmt.Printf("%s \n", rJSON)
+	result := executeQuery(query, schema)
+	json.NewEncoder(w).Encode(result)
 }
 
 func main() {
+	_ = importJSONDataFromFile("data.json", &data)
 	http.HandleFunc("/", handler)
 	http.ListenAndServe(":8080", nil)
+}
+
+func importJSONDataFromFile(fileName string, result interface{}) (isOK bool) {
+	isOK = true
+	content, err := ioutil.ReadFile(fileName)
+	if err != nil {
+		fmt.Print("Error:", err)
+		isOK = false
+	}
+	err = json.Unmarshal(content, result)
+	if err != nil {
+		isOK = false
+		fmt.Print("Error:", err)
+	}
+
+	return
 }
