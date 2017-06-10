@@ -7,12 +7,15 @@ import (
 	"bytes"
 
 	"github.com/graphql-go/graphql"
-	"io/ioutil"
+	"github.com/jmoiron/sqlx"
+	_ "github.com/go-sql-driver/mysql"
 )
 
+var DB *sqlx.DB
+
 type user struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID   string `db:"id" json:"id"`
+	Name string `db:"name" json:"name"`
 }
 
 var data map[string]user
@@ -45,8 +48,14 @@ var queryType = graphql.NewObject(
 				Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 					idQuery, isOK := p.Args["id"].(string)
 					if isOK {
-						return data[idQuery], nil
+						var u = user{}
+						err := DB.Get(&u, "SELECT * FROM user WHERE id=$1", idQuery)
+						if err != nil {
+							return nil, nil
+						}
+						return &u, nil
 					}
+
 					return nil, nil
 				},
 			},
@@ -74,7 +83,6 @@ func executeQuery(query string, schema graphql.Schema) *graphql.Result {
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
-	// Query
 	bufBody := new(bytes.Buffer)
 	bufBody.ReadFrom(r.Body)
 	query := bufBody.String()
@@ -84,23 +92,15 @@ func handler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	_ = importJSONDataFromFile("data.json", &data)
+	connectDB()
 	http.HandleFunc("/", handler)
 	http.ListenAndServe(":8080", nil)
 }
 
-func importJSONDataFromFile(fileName string, result interface{}) (isOK bool) {
-	isOK = true
-	content, err := ioutil.ReadFile(fileName)
+func connectDB() {
+	db, err := sqlx.Connect("mysql", "root:@/sample_graphql")
 	if err != nil {
 		fmt.Print("Error:", err)
-		isOK = false
 	}
-	err = json.Unmarshal(content, result)
-	if err != nil {
-		isOK = false
-		fmt.Print("Error:", err)
-	}
-
-	return
+	DB = db
 }
